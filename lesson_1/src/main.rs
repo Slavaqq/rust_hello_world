@@ -4,7 +4,7 @@ use std::io;
 fn main() {
     let mut arguments = env::args();
     let _ = arguments.next().unwrap();
-    let greeting = arguments.next().unwrap_or("Hello".to_string());
+    let greeting = arguments.next().unwrap_or(String::from("Hello"));
 
     println!("Enter your name:");
     let mut name = String::new();
