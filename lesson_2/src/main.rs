@@ -9,18 +9,19 @@
 //! - crabify
 //! - csv
 
+mod operations;
+
+use operations::Operation;
 use std::env;
 use std::error::Error;
 use std::io::{self, Read};
 
-mod operations;
-
 struct Output {
     result: String,
-    operation: operations::Operation,
+    operation: Operation,
 }
 
-fn parse_arguments(arguments: Vec<String>) -> Result<operations::Operation, Box<dyn Error>> {
+fn parse_arguments(arguments: Vec<String>) -> Result<Operation, Box<dyn Error>> {
     let arguments_length = arguments.len();
     if arguments_length != 2 {
         return Err(From::from(format!(
@@ -31,21 +32,21 @@ fn parse_arguments(arguments: Vec<String>) -> Result<operations::Operation, Box<
 
     let argument: &str = &arguments[1].to_lowercase();
     match argument {
-        "lowercase" => Ok(operations::Operation::Lowercase),
-        "uppercase" => Ok(operations::Operation::Uppercase),
-        "no-spaces" => Ok(operations::Operation::NoSpaces),
-        "slugify" => Ok(operations::Operation::Slugify),
-        "unchanged" => Ok(operations::Operation::Unchanged),
-        "crabify" => Ok(operations::Operation::Crabify),
-        "csv" => Ok(operations::Operation::Csv),
+        "lowercase" => Ok(Operation::Lowercase),
+        "uppercase" => Ok(Operation::Uppercase),
+        "no-spaces" => Ok(Operation::NoSpaces),
+        "slugify" => Ok(Operation::Slugify),
+        "unchanged" => Ok(Operation::Unchanged),
+        "crabify" => Ok(Operation::Crabify),
+        "csv" => Ok(Operation::Csv),
         _ => Err(From::from(format!("Unknown argument: {argument}!"))),
     }
 }
 
-fn get_std_input(operation: &operations::Operation) -> Result<String, Box<dyn Error>> {
+fn get_std_input(operation: &Operation) -> Result<String, Box<dyn Error>> {
     let mut input = String::new();
     let input = match operation {
-        operations::Operation::Csv => {
+        Operation::Csv => {
             println!("Enter csv to transmute (Press Ctrl-D to end):");
             io::stdin().read_to_string(&mut input)?;
             input
@@ -65,13 +66,13 @@ fn transtext(arguments: Vec<String>) -> Result<Output, Box<dyn Error>> {
     let input = get_std_input(&operation)?;
 
     let result = match operation {
-        operations::Operation::Lowercase => operations::lowercase(&input),
-        operations::Operation::Uppercase => operations::uppercase(&input),
-        operations::Operation::NoSpaces => operations::no_spaces(&input),
-        operations::Operation::Slugify => operations::slugify(&input),
-        operations::Operation::Unchanged => operations::unchanged(&input),
-        operations::Operation::Crabify => operations::crabify(&input),
-        operations::Operation::Csv => operations::csv(&input),
+        Operation::Lowercase => operations::lowercase(&input),
+        Operation::Uppercase => operations::uppercase(&input),
+        Operation::NoSpaces => operations::no_spaces(&input),
+        Operation::Slugify => operations::slugify(&input),
+        Operation::Unchanged => operations::unchanged(&input),
+        Operation::Crabify => operations::crabify(&input),
+        Operation::Csv => operations::csv(&input),
     }?;
 
     Ok(Output { result, operation })

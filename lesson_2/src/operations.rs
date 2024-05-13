@@ -14,23 +14,23 @@ pub enum Operation {
 }
 
 pub fn lowercase(s: &str) -> Result<String, Box<dyn Error>> {
-    Ok(s.to_lowercase())
+    Ok(s.trim().to_lowercase())
 }
 
 pub fn uppercase(s: &str) -> Result<String, Box<dyn Error>> {
-    Ok(s.to_uppercase())
+    Ok(s.trim().to_uppercase())
 }
 
 pub fn no_spaces(s: &str) -> Result<String, Box<dyn Error>> {
-    Ok(s.replace(" ", ""))
+    Ok(s.trim().replace(" ", ""))
 }
 
 pub fn slugify(s: &str) -> Result<String, Box<dyn Error>> {
-    Ok(slug::slugify(s))
+    Ok(slug::slugify(s.trim()))
 }
 
 pub fn unchanged(s: &str) -> Result<String, Box<dyn Error>> {
-    Ok(String::from(s))
+    Ok(String::from(s.trim()))
 }
 
 pub fn crabify(s: &str) -> Result<String, Box<dyn Error>> {
