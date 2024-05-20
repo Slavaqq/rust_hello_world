@@ -1,6 +1,9 @@
 use slug;
 use std::error::Error;
 use std::fmt;
+use std::fs::File;
+use std::io::Read;
+use std::str::FromStr;
 
 #[derive(Debug)]
 pub enum Operation {
@@ -11,6 +14,23 @@ pub enum Operation {
     Unchanged,
     Crabify,
     Csv,
+}
+
+impl FromStr for Operation {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "lowercase" => Ok(Operation::Lowercase),
+            "uppercase" => Ok(Operation::Uppercase),
+            "no-spaces" => Ok(Operation::NoSpaces),
+            "slugify" => Ok(Operation::Slugify),
+            "unchanged" => Ok(Operation::Unchanged),
+            "crabify" => Ok(Operation::Crabify),
+            "csv" => Ok(Operation::Csv),
+            _ => Err(From::from(format!("Unknown argument: {s}!"))),
+        }
+    }
 }
 
 pub fn lowercase(s: &str) -> Result<String, Box<dyn Error>> {
@@ -38,13 +58,15 @@ pub fn crabify(s: &str) -> Result<String, Box<dyn Error>> {
 }
 
 pub fn csv(s: &str) -> Result<String, Box<dyn Error>> {
-    let mut lines = s.lines();
+    let mut file = File::open(s.trim())?;
+    let mut input = String::new();
+    file.read_to_string(&mut input)?;
+    let mut lines = input.lines();
     let header: Vec<&str> = lines.next().ok_or("Missing header!")?.split(",").collect();
     let rows: Vec<Vec<&str>> = lines.into_iter().map(|e| e.split(",").collect()).collect();
     let header_length = header.len();
     for row in &rows {
         let row_length = row.len();
-        println!("{:?}", row);
         if row_length != header_length {
             return Err(From::from(format!(
                 "Excepting {} columns, got {}!",
