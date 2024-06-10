@@ -9,3 +9,4 @@ description = "Library for simple chat app"
 [dependencies]
 bincode = "1.3.3"
 serde = {version = "1.0.203", features = ["derive"]}
+thiserror = "1.0.61"
