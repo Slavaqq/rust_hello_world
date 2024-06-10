@@ -17,7 +17,6 @@
 extern crate chat;
 
 use chat::{Message, MessageType};
-use std::error::Error;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
@@ -27,6 +26,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use anyhow::{anyhow, Context, Result};
 use rodio::{source::Source, Decoder, OutputStream};
 use slugify::slugify;
 
@@ -50,8 +50,8 @@ fn print_help(nickname: &str) {
     println!("");
 }
 
-fn run_client() -> Result<(), Box<dyn Error>> {
-    let address = chat::parse_arguments()?;
+fn run_client() -> Result<()> {
+    let address = chat::Address::parse_arguments();
     let stream = net::TcpStream::connect(address.to_string())?;
     let reading_stream = stream.try_clone()?;
     let nickname = get_nickname()?;
@@ -64,7 +64,7 @@ fn run_client() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn get_nickname() -> Result<String, Box<dyn Error>> {
+fn get_nickname() -> Result<String> {
     let mut input = String::new();
     println!("Choose your nickname:");
     io::stdin().read_line(&mut input)?;
@@ -72,19 +72,22 @@ fn get_nickname() -> Result<String, Box<dyn Error>> {
     Ok(nickname)
 }
 
-fn reading_loop(stream: TcpStream) -> Result<(), Box<dyn Error>> {
+fn reading_loop(stream: TcpStream) -> Result<()> {
     loop {
-        read_message(&stream)?;
+        let message = chat::Message::read(&stream)?;
+        if let Err(err_msg) = handle_message(message) {
+            eprintln!("Message hadling error: {:?}", err_msg);
+        };
         thread::spawn(|| meow().unwrap_or_else(|err_msg| eprintln!("Sound error {:?}", err_msg)));
     }
 }
 
-fn writing_loop(stream: TcpStream, nickname: &str) -> Result<(), Box<dyn Error>> {
+fn writing_loop(stream: TcpStream, nickname: &str) -> Result<()> {
     loop {
         match get_input(nickname) {
             Ok(result) => match result {
                 Command::Quit => break,
-                Command::Message(message) => send_message(&stream, message)?,
+                Command::Message(message) => message.send(&stream)?,
             },
             Err(err_msg) => eprintln!("Input error: {}", err_msg),
         }
@@ -92,35 +95,39 @@ fn writing_loop(stream: TcpStream, nickname: &str) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
-fn get_input(nickname: &str) -> Result<Command, Box<dyn Error>> {
+fn get_input(nickname: &str) -> Result<Command> {
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
     let input = input.trim().to_string();
     parse_input(input, nickname)
 }
 
-fn parse_input(input: String, nickname: &str) -> Result<Command, Box<dyn Error>> {
+fn parse_input(input: String, nickname: &str) -> Result<Command> {
     let nickname = nickname.to_string();
-    let command = if input.starts_with(".file ") {
-        let (_, path) = input.split_once(" ").ok_or("Invalid command .file!")?;
+    let command = if input.starts_with(".file") {
+        let (_, path) = input
+            .split_once(" ")
+            .ok_or(anyhow!("Invalid command .file!"))?;
         let (name, content) = get_file(path)?;
-        let message = MessageType::File { name, content };
-        Command::Message(Message { nickname, message })
-    } else if input.starts_with(".image ") {
-        let (_, path) = input.split_once(" ").ok_or("Invalid command .image!")?;
+        let message = MessageType::file(name, &content);
+        Command::Message(Message::from(nickname, message))
+    } else if input.starts_with(".image") {
+        let (_, path) = input
+            .split_once(" ")
+            .ok_or(anyhow!("Invalid command .image!"))?;
         let (_, content) = get_file(path)?;
-        let message = MessageType::Image(content);
-        Command::Message(Message { nickname, message })
+        let message = MessageType::image(&content);
+        Command::Message(Message::from(nickname, message))
     } else if input == ".quit" {
         Command::Quit
     } else {
-        let message = MessageType::Text(input);
-        Command::Message(Message { nickname, message })
+        let message = MessageType::text(input);
+        Command::Message(Message::from(nickname, message))
     };
     Ok(command)
 }
 
-fn get_file(path: &str) -> Result<(String, Vec<u8>), Box<dyn Error>> {
+fn get_file(path: &str) -> Result<(String, Vec<u8>)> {
     let mut file = File::open(path)?;
     let mut buff = Vec::new();
     file.read_to_end(&mut buff)?;
@@ -132,38 +139,20 @@ fn get_file(path: &str) -> Result<(String, Vec<u8>), Box<dyn Error>> {
     Ok((name, buff))
 }
 
-fn send_message(mut stream: &TcpStream, message: Message) -> Result<(), Box<dyn Error>> {
-    let message = message.serialized_message()?;
-    let message_length = message.len() as u32;
-    let mut full_message = message_length.to_be_bytes().to_vec();
-    full_message.extend(message);
-    stream.write_all(&full_message)?;
-    Ok(())
-}
-
-fn read_message(mut stream: &TcpStream) -> Result<(), Box<dyn Error>> {
-    let mut length_bytes = [0u8; 4];
-    stream.read_exact(&mut length_bytes)?;
-    let message_length = u32::from_be_bytes(length_bytes) as usize;
-    let mut buf = vec![0u8; message_length];
-    stream.read_exact(&mut buf)?;
-    let m = chat::Message::deserialized_message(&buf)?;
-    handle_message(m)?;
-    Ok(())
-}
-
-fn handle_message(message: Message) -> Result<(), Box<dyn Error>> {
+fn handle_message(message: Message) -> Result<()> {
     let nickname = message.nickname;
     print!("{nickname} --> ");
     match message.message {
         MessageType::Text(text) => println!("{text}"),
-        MessageType::Image(content) => save_image(content)?,
-        MessageType::File { name, content } => save_file(name, content)?,
+        MessageType::Image(content) => save_image(content).context("Saving image failed!")?,
+        MessageType::File { name, content } => {
+            save_file(name, content).context("Saving file failed!")?
+        }
     }
     Ok(())
 }
 
-fn meow() -> Result<(), Box<dyn Error>> {
+fn meow() -> Result<()> {
     let (_stream, stream_handle) = OutputStream::try_default()?;
     let file = File::open(SOUND_FILE)?;
     let source = Decoder::new(BufReader::new(file))?;
@@ -172,12 +161,12 @@ fn meow() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn get_timestamp() -> Result<u64, Box<dyn Error>> {
+fn get_timestamp() -> Result<u64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
 }
 
-fn save_image(content: Vec<u8>) -> Result<(), Box<dyn Error>> {
-    create_directory(IMAGE_FOLDER)?;
+fn save_image(content: Vec<u8>) -> Result<()> {
+    create_directory(FILE_FOLDER)?;
     let timestamp = get_timestamp()?;
     let name = format!("{timestamp:?}.png");
     let path = Path::new(IMAGE_FOLDER).join(&name);
@@ -187,7 +176,7 @@ fn save_image(content: Vec<u8>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn save_file(name: String, content: Vec<u8>) -> Result<(), Box<dyn Error>> {
+fn save_file(name: String, content: Vec<u8>) -> Result<()> {
     create_directory(FILE_FOLDER)?;
     let path = Path::new(FILE_FOLDER).join(&name);
     let mut file = File::create(path)?;
@@ -196,9 +185,9 @@ fn save_file(name: String, content: Vec<u8>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn create_directory(path: &str) -> Result<(), Box<dyn Error>> {
+fn create_directory(path: &str) -> Result<()> {
     if !Path::new(path).exists() {
-        fs::create_dir_all(path)?
+        fs::create_dir_all(path).with_context(|| format!("Creating dir {path} failed!"))?;
     }
     Ok(())
 }

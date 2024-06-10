@@ -10,12 +10,12 @@
 extern crate chat;
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::io::{Read, Write};
 use std::net::{self, TcpStream};
 use std::sync::Arc;
 use std::thread;
 
+use anyhow::{Context, Result};
 use env_logger::{Builder, Env};
 use log::{debug, error, info, log_enabled, Level};
 use parking_lot::Mutex;
@@ -27,9 +27,9 @@ fn log_broadcasting(
     message: &[u8],
     sender_id: &usize,
     client_id: &usize,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     if log_enabled!(Level::Debug) {
-        let addr = stream.peer_addr()?;
+        let addr = stream.peer_addr().context("stream address error!")?;
         debug!(
             "Broadcasting message (length {}) from client {}, to client {} on addr: {}",
             &message.len(),
@@ -58,27 +58,23 @@ fn log_incoming(message: &[u8], client_id: &usize) {
     }
 }
 
-fn broadcasting(
-    sender_id: &usize,
-    clients: &Clients,
-    message: &[u8],
-) -> Result<(), Box<dyn Error>> {
+fn broadcasting(sender_id: &usize, clients: &Clients, message: &[u8]) -> Result<()> {
     let clients = clients.lock();
     for (client_id, stream) in clients.iter() {
         if client_id != sender_id {
-            let mut stream = stream.try_clone()?;
-            stream.write_all(message)?;
-            log_broadcasting(&stream, message, sender_id, client_id)?;
+            let mut stream = stream.try_clone().context("stream cloning failed!")?;
+            stream
+                .write_all(message)
+                .context("broadcasting message failed!")?;
+            if let Err(err_msg) = log_broadcasting(&stream, message, sender_id, client_id) {
+                error!("Logging error: {:?}", err_msg);
+            }
         }
     }
     Ok(())
 }
 
-fn handle_client(
-    client_id: usize,
-    clients: Clients,
-    stream: TcpStream,
-) -> Result<(), Box<dyn Error>> {
+fn handle_client(client_id: usize, clients: Clients, stream: TcpStream) -> Result<()> {
     let mut buf = [0; 128];
     {
         let mut clients = clients.lock();
@@ -105,9 +101,10 @@ fn handle_client(
     Ok(())
 }
 
-fn run_server() -> Result<(), Box<dyn Error>> {
-    let address = chat::parse_arguments()?;
-    let listener = net::TcpListener::bind(address.to_string())?;
+fn run_server() -> Result<()> {
+    let address = chat::Address::parse_arguments();
+    let listener = net::TcpListener::bind(address.to_string())
+        .with_context(|| format!("Binding error for address: {}", address.to_string()))?;
     info!("Server listen on: {}", address.to_string());
 
     let clients: Clients = Arc::new(Mutex::new(HashMap::new()));

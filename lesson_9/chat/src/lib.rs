@@ -1,6 +1,10 @@
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::{env, io};
+
+use bincode::Error as BincodeError;
 use serde::{Deserialize, Serialize};
-use std::env;
-use std::error::Error;
+use thiserror::Error;
 
 const HOSTNAME: &str = "localhost";
 const PORT: &str = "11111";
@@ -31,6 +35,14 @@ pub enum MessageType {
         name: String,
         content: Vec<u8>,
     },
+}
+
+#[derive(Error, Debug)]
+pub enum MessageError {
+    #[error("de/serialization error")]
+    DeSerializationError(#[from] BincodeError),
+    #[error(transparent)]
+    IOError(#[from] io::Error),
 }
 
 impl Address {
@@ -67,6 +79,26 @@ impl Address {
             port: PORT.to_string(),
         }
     }
+    /// Parses command-line arguments to create an Address.
+    ///
+    /// If the correct number of arguments is not provided, it returns a default Address.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Address)` - If parsing is successful.
+    /// - `Err(Box<dyn Error>)` - If an error occurs during parsing.
+    ///
+    pub fn parse_arguments() -> Address {
+        let arguments: Vec<String> = env::args().collect();
+
+        match arguments.len() {
+            3 => Address::new(
+                arguments.get(1).unwrap_or(&HOSTNAME.into()).clone(),
+                arguments.get(2).unwrap_or(&PORT.into()).clone(),
+            ),
+            _ => Address::default(),
+        }
+    }
 }
 
 impl ToString for Address {
@@ -84,28 +116,116 @@ impl ToString for Address {
     }
 }
 
-/// Parses command-line arguments to create an Address.
-///
-/// If the correct number of arguments is not provided, it returns a default Address.
-///
-/// # Returns
-///
-/// - `Ok(Address)` - If parsing is successful.
-/// - `Err(Box<dyn Error>)` - If an error occurs during parsing.
-///
-pub fn parse_arguments() -> Result<Address, Box<dyn Error>> {
-    let arguments: Vec<String> = env::args().collect();
+impl MessageType {
+    /// Creates a Text type MessageType.
+    ///
+    /// # Arguments
+    ///
+    /// - `text` - A string slice that holds the text of the message.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chat::MessageType;
+    /// let msg = MessageType::text("Hello");
+    /// ```
+    pub fn text<S: AsRef<str>>(text: S) -> Self {
+        MessageType::Text(text.as_ref().into())
+    }
 
-    match arguments.len() {
-        3 => Ok(Address::new(
-            arguments.get(1).unwrap_or(&HOSTNAME.to_string()).clone(),
-            arguments.get(2).unwrap_or(&PORT.to_string()).clone(),
-        )),
-        _ => Ok(Address::default()),
+    /// Creates a Text type MessageType.
+    ///
+    /// # Arguments
+    ///
+    /// - `name` - A string slice that holds the name.
+    /// - `data` - File content.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chat::MessageType;
+    /// let file_data = vec![0u8; 10];
+    /// let msg = MessageType::file("test.txt", &file_data);
+    /// ```
+    pub fn file<S: AsRef<str>>(name: S, data: &[u8]) -> Self {
+        MessageType::File {
+            name: name.as_ref().into(),
+            content: data.to_vec(),
+        }
+    }
+    /// Creates a Text type MessageType.
+    ///
+    /// # Arguments
+    ///
+    /// - `data` - File content.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chat::MessageType;
+    /// let file_data = vec![0u8; 10];
+    /// let msg = MessageType::image(&file_data);
+    /// ```
+    pub fn image(data: &[u8]) -> Self {
+        MessageType::Image(data.to_vec())
     }
 }
 
 impl Message {
+    /// Creates a new Message with the specified nickname and Message.
+    ///
+    /// # Arguments
+    ///
+    /// - `nickaname` - A string slice that holds the nickname.
+    /// - `message` - A MessageType.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chat::Message;
+    /// use chat::MessageType;
+    /// let m = MessageType::text("Hello");
+    /// let msg = Message::from("user", m);
+    /// assert_eq!(msg.nickname, "user");
+    /// ```
+    pub fn from<S: AsRef<str>>(nickname: S, message: MessageType) -> Self {
+        Message {
+            nickname: nickname.as_ref().into(),
+            message,
+        }
+    }
+
+    /// Send a Message over the TcpStream.
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// - `stream` - mutable TcpStream.
+    ///
+    pub fn send(&self, mut stream: &TcpStream) -> Result<(), MessageError> {
+        let message = self.serialized_message()?;
+        let message_length = message.len() as u32;
+        let mut full_message = message_length.to_be_bytes().to_vec();
+        full_message.extend(message);
+        stream.write_all(&full_message)?;
+        Ok(())
+    }
+
+    /// Read a Message from the TcpStream.
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// - `stream` - mutable TcpStream.
+    ///
+    pub fn read(mut stream: &TcpStream) -> Result<Self, MessageError> {
+        let mut length_bytes = [0u8; 4];
+        stream.read_exact(&mut length_bytes)?;
+        let message_length = u32::from_be_bytes(length_bytes) as usize;
+        let mut buf = vec![0u8; message_length];
+        stream.read_exact(&mut buf)?;
+        Ok(Message::deserialized_message(&buf)?)
+    }
     /// Serializes the Message to a vector of bytes.
     ///
     /// # Returns
@@ -122,9 +242,8 @@ impl Message {
     /// let msg_bytes: Vec<u8> = vec![4, 0, 0, 0, 0, 0, 0, 0, 117, 115, 101, 114, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 72, 101, 108, 108, 111];
     /// assert_eq!(serialized_msg, msg_bytes);
     /// ```
-    pub fn serialized_message(&self) -> Result<Vec<u8>, Box<dyn Error>> {
-        let serialized = bincode::serialize(&self)?;
-        Ok(serialized)
+    pub fn serialized_message(&self) -> Result<Vec<u8>, BincodeError> {
+        bincode::serialize(&self)
     }
     /// Deserializes a vector of bytes to a Message.
     ///
@@ -146,8 +265,7 @@ impl Message {
     /// let msg = Message { nickname: "user".to_string(), message: MessageType::Text("Hello".to_string()) };
     /// assert_eq!(deserialized_msg.nickname, msg.nickname);
     /// ```
-    pub fn deserialized_message(input: &[u8]) -> Result<Message, Box<dyn Error>> {
-        let deserialized = bincode::deserialize(input)?;
-        Ok(deserialized)
+    pub fn deserialized_message(input: &[u8]) -> Result<Message, BincodeError> {
+        bincode::deserialize(input)
     }
 }
