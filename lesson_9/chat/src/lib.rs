@@ -1,10 +1,10 @@
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::marker::Unpin;
 use std::{env, io};
 
 use bincode::Error as BincodeError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const HOSTNAME: &str = "localhost";
 const PORT: &str = "11111";
@@ -17,14 +17,14 @@ pub struct Address {
 }
 
 /// Represents a message with a nickname and a message type.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
     pub nickname: String,
     pub message: MessageType,
 }
 
 /// Enum representing different types of messages.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum MessageType {
     /// Text message.
     Text(String),
@@ -41,6 +41,8 @@ pub enum MessageType {
 pub enum MessageError {
     #[error("de/serialization error")]
     DeSerializationError(#[from] BincodeError),
+    #[error("unexpected")]
+    UnexpectedEof,
     #[error(transparent)]
     IOError(#[from] io::Error),
 }
@@ -202,12 +204,12 @@ impl Message {
     ///
     /// - `stream` - mutable TcpStream.
     ///
-    pub fn send(&self, mut stream: &TcpStream) -> Result<(), MessageError> {
+    pub async fn send<T: AsyncWriteExt + Unpin>(&self, mut stream: T) -> Result<(), MessageError> {
         let message = self.serialized_message()?;
         let message_length = message.len() as u32;
         let mut full_message = message_length.to_be_bytes().to_vec();
         full_message.extend(message);
-        stream.write_all(&full_message)?;
+        stream.write_all(&full_message).await?;
         Ok(())
     }
 
@@ -218,12 +220,18 @@ impl Message {
     ///
     /// - `stream` - mutable TcpStream.
     ///
-    pub fn read(mut stream: &TcpStream) -> Result<Self, MessageError> {
+    pub async fn read<T: AsyncReadExt + Unpin>(mut stream: T) -> Result<Self, MessageError> {
         let mut length_bytes = [0u8; 4];
-        stream.read_exact(&mut length_bytes)?;
+        match stream.read_exact(&mut length_bytes).await {
+            Ok(_) => Ok(()),
+            Err(err_msg) if err_msg.kind() == std::io::ErrorKind::UnexpectedEof => {
+                Err(MessageError::UnexpectedEof)
+            }
+            Err(err_msg) => Err(MessageError::IOError(err_msg)),
+        }?;
         let message_length = u32::from_be_bytes(length_bytes) as usize;
         let mut buf = vec![0u8; message_length];
-        stream.read_exact(&mut buf)?;
+        stream.read_exact(&mut buf).await?;
         Ok(Message::deserialized_message(&buf)?)
     }
     /// Serializes the Message to a vector of bytes.

@@ -17,18 +17,17 @@
 extern crate chat;
 
 use chat::{Message, MessageType};
-use std::fs;
-use std::fs::File;
-use std::io::BufReader;
-use std::io::{self, Read, Write};
-use std::net::{self, TcpStream};
 use std::path::Path;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 use anyhow::{anyhow, Context, Result};
 use rodio::{source::Source, Decoder, OutputStream};
 use slugify::slugify;
+use tokio::fs::{self, File};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 const IMAGE_FOLDER: &str = "IMAGES";
 const FILE_FOLDER: &str = "FILES";
@@ -50,44 +49,47 @@ fn print_help(nickname: &str) {
     println!("");
 }
 
-fn run_client() -> Result<()> {
+async fn run_client() -> Result<()> {
     let address = chat::Address::parse_arguments();
-    let stream = net::TcpStream::connect(address.to_string())?;
-    let reading_stream = stream.try_clone()?;
+    let stream = TcpStream::connect(address.to_string()).await?;
+    let (reading_stream, writing_stream) = stream.into_split();
     let nickname = get_nickname()?;
     print_help(&nickname);
-    thread::spawn(move || {
+    tokio::spawn(async move {
         reading_loop(reading_stream)
+            .await
             .unwrap_or_else(|err_msg| eprintln!("Reading error: {:?}", err_msg))
     });
-    writing_loop(stream, &nickname)?;
+    writing_loop(writing_stream, &nickname).await?;
     Ok(())
 }
 
 fn get_nickname() -> Result<String> {
     let mut input = String::new();
     println!("Choose your nickname:");
-    io::stdin().read_line(&mut input)?;
+    std::io::stdin().read_line(&mut input)?;
     let nickname = slugify!(input.trim());
     Ok(nickname)
 }
 
-fn reading_loop(stream: TcpStream) -> Result<()> {
+async fn reading_loop(mut stream: OwnedReadHalf) -> Result<()> {
     loop {
-        let message = chat::Message::read(&stream)?;
-        if let Err(err_msg) = handle_message(message) {
+        let message = chat::Message::read(&mut stream).await?;
+        if let Err(err_msg) = handle_message(message).await {
             eprintln!("Message hadling error: {:?}", err_msg);
         };
-        thread::spawn(|| meow().unwrap_or_else(|err_msg| eprintln!("Sound error {:?}", err_msg)));
+        thread::spawn(move || {
+            meow().unwrap_or_else(|err_msg| eprintln!("Sound error {:?}", err_msg))
+        });
     }
 }
 
-fn writing_loop(stream: TcpStream, nickname: &str) -> Result<()> {
+async fn writing_loop(mut stream: OwnedWriteHalf, nickname: &str) -> Result<()> {
     loop {
-        match get_input(nickname) {
+        match get_input(nickname).await {
             Ok(result) => match result {
                 Command::Quit => break,
-                Command::Message(message) => message.send(&stream)?,
+                Command::Message(message) => message.send(&mut stream).await?,
             },
             Err(err_msg) => eprintln!("Input error: {}", err_msg),
         }
@@ -95,27 +97,27 @@ fn writing_loop(stream: TcpStream, nickname: &str) -> Result<()> {
     Ok(())
 }
 
-fn get_input(nickname: &str) -> Result<Command> {
+async fn get_input(nickname: &str) -> Result<Command> {
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    std::io::stdin().read_line(&mut input)?;
     let input = input.trim().to_string();
-    parse_input(input, nickname)
+    parse_input(input, nickname).await
 }
 
-fn parse_input(input: String, nickname: &str) -> Result<Command> {
+async fn parse_input(input: String, nickname: &str) -> Result<Command> {
     let nickname = nickname.to_string();
     let command = if input.starts_with(".file") {
         let (_, path) = input
             .split_once(" ")
             .ok_or(anyhow!("Invalid command .file!"))?;
-        let (name, content) = get_file(path)?;
+        let (name, content) = get_file(path).await?;
         let message = MessageType::file(name, &content);
         Command::Message(Message::from(nickname, message))
     } else if input.starts_with(".image") {
         let (_, path) = input
             .split_once(" ")
             .ok_or(anyhow!("Invalid command .image!"))?;
-        let (_, content) = get_file(path)?;
+        let (_, content) = get_file(path).await?;
         let message = MessageType::image(&content);
         Command::Message(Message::from(nickname, message))
     } else if input == ".quit" {
@@ -127,10 +129,10 @@ fn parse_input(input: String, nickname: &str) -> Result<Command> {
     Ok(command)
 }
 
-fn get_file(path: &str) -> Result<(String, Vec<u8>)> {
-    let mut file = File::open(path)?;
+async fn get_file(path: &str) -> Result<(String, Vec<u8>)> {
+    let mut file = File::open(path).await?;
     let mut buff = Vec::new();
-    file.read_to_end(&mut buff)?;
+    file.read_to_end(&mut buff).await?;
     let name = Path::new(path)
         .file_name()
         .and_then(|f| f.to_str())
@@ -139,23 +141,23 @@ fn get_file(path: &str) -> Result<(String, Vec<u8>)> {
     Ok((name, buff))
 }
 
-fn handle_message(message: Message) -> Result<()> {
+async fn handle_message(message: Message) -> Result<()> {
     let nickname = message.nickname;
     print!("{nickname} --> ");
     match message.message {
         MessageType::Text(text) => println!("{text}"),
-        MessageType::Image(content) => save_image(content).context("Saving image failed!")?,
-        MessageType::File { name, content } => {
-            save_file(name, content).context("Saving file failed!")?
-        }
+        MessageType::Image(content) => save_image(content).await.context("Saving image failed!")?,
+        MessageType::File { name, content } => save_file(name, content)
+            .await
+            .context("Saving file failed!")?,
     }
     Ok(())
 }
 
 fn meow() -> Result<()> {
     let (_stream, stream_handle) = OutputStream::try_default()?;
-    let file = File::open(SOUND_FILE)?;
-    let source = Decoder::new(BufReader::new(file))?;
+    let file = std::fs::File::open(SOUND_FILE)?;
+    let source = Decoder::new(std::io::BufReader::new(file))?;
     stream_handle.play_raw(source.convert_samples())?;
     std::thread::sleep(std::time::Duration::from_secs(2));
     Ok(())
@@ -165,35 +167,38 @@ fn get_timestamp() -> Result<u64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
 }
 
-fn save_image(content: Vec<u8>) -> Result<()> {
-    create_directory(FILE_FOLDER)?;
+async fn save_image(content: Vec<u8>) -> Result<()> {
+    create_directory(FILE_FOLDER).await?;
     let timestamp = get_timestamp()?;
     let name = format!("{timestamp:?}.png");
     let path = Path::new(IMAGE_FOLDER).join(&name);
-    let mut file = File::create(path)?;
-    file.write_all(&content)?;
+    let mut file = File::create(path).await?;
+    file.write_all(&content).await?;
     println!("Saving image to: {}/{}.", IMAGE_FOLDER, &name);
     Ok(())
 }
 
-fn save_file(name: String, content: Vec<u8>) -> Result<()> {
-    create_directory(FILE_FOLDER)?;
+async fn save_file(name: String, content: Vec<u8>) -> Result<()> {
+    create_directory(FILE_FOLDER).await?;
     let path = Path::new(FILE_FOLDER).join(&name);
-    let mut file = File::create(path)?;
-    file.write_all(&content)?;
+    let mut file = File::create(path).await?;
+    file.write_all(&content).await?;
     println!("Saving file to: {}/{}.", FILE_FOLDER, &name);
     Ok(())
 }
 
-fn create_directory(path: &str) -> Result<()> {
+async fn create_directory(path: &str) -> Result<()> {
     if !Path::new(path).exists() {
-        fs::create_dir_all(path).with_context(|| format!("Creating dir {path} failed!"))?;
+        fs::create_dir_all(path)
+            .await
+            .with_context(|| format!("Creating dir {path} failed!"))?;
     }
     Ok(())
 }
 
-fn main() {
-    match run_client() {
+#[tokio::main]
+async fn main() {
+    match run_client().await {
         Ok(_) => (),
         Err(err_msg) => eprintln!("Client error: {}", err_msg),
     }
