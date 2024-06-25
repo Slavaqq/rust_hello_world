@@ -171,6 +171,14 @@ impl MessageType {
     pub fn image(data: &[u8]) -> Self {
         MessageType::Image(data.to_vec())
     }
+
+    pub fn get_type_and_message(&self) -> (&str, String) {
+        match self {
+            Self::Text(text) => ("Text", text.clone()),
+            Self::Image(_) => ("Image", "".to_string()),
+            Self::File { name, content: _ } => ("File", name.clone()),
+        }
+    }
 }
 
 impl Message {

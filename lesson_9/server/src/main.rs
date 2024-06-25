@@ -12,10 +12,13 @@ extern crate chat;
 use anyhow::{Context, Result};
 use env_logger::{Builder, Env};
 use log::{debug, error, info, log_enabled, Level};
+use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 
 use chat::{Message, MessageError};
+
+const DB: &str = "sqlite://server.db";
 
 fn log_broadcasting(
     message: &Message,
@@ -47,6 +50,7 @@ fn log_incoming(message: &Message, client_addr: &core::net::SocketAddr) {
 }
 
 async fn run_server() -> Result<()> {
+    let pool = init_db().await?;
     let address = chat::Address::parse_arguments();
     let listener = TcpListener::bind(address.to_string())
         .await
@@ -62,12 +66,16 @@ async fn run_server() -> Result<()> {
         let sender = broadcast_send.clone();
         let mut receiver = broadcast_send.subscribe();
         let (mut stream_read, mut stream_writer) = stream.into_split();
+        let p = pool.clone();
 
         tokio::spawn(async move {
             loop {
                 match Message::read(&mut stream_read).await {
                     Ok(msg) => {
                         log_incoming(&msg, &addr);
+                        if let Err(err_msg) = insert_db(&p, &msg).await {
+                            error!("Insert database error: {err_msg}");
+                        };
                         if sender.send((msg, addr)).is_err() {
                             break;
                         }
@@ -102,6 +110,57 @@ async fn run_server() -> Result<()> {
 fn logger_init() {
     let env = Env::default().filter_or("RUST_LOG", "info");
     Builder::from_env(env).init();
+}
+
+async fn init_db() -> Result<SqlitePool> {
+    if !Sqlite::database_exists(DB).await.unwrap_or(false) {
+        info!("Creating database: {}", DB);
+        Sqlite::create_database(DB)
+            .await
+            .context("Creating database error!")?;
+    }
+    let pool = SqlitePool::connect(DB)
+        .await
+        .context("Connecting database error!")?;
+    create_table(&pool).await?;
+    Ok(pool)
+}
+
+async fn create_table(pool: &SqlitePool) -> Result<()> {
+    sqlx::query(
+        r#"
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY,
+        nickname TEXT NOT NULL,
+        msg_type TEXT NOT NULL,
+        message TEXT NOT NULL
+    );
+    "#,
+    )
+    .execute(pool)
+    .await
+    .context("Creating database table error!")?;
+    Ok(())
+}
+
+async fn insert_db(pool: &SqlitePool, message: &Message) -> Result<()> {
+    let (msg_type, message_value) = message.message.get_type_and_message();
+    let mut connection = pool.acquire().await?;
+    let id = sqlx::query(
+        r#"
+        INSERT INTO messages ( nickname, msg_type, message )
+        VALUES ( ?1, ?2, ?3 )
+        "#,
+    )
+    .bind(&message.nickname)
+    .bind(msg_type)
+    .bind(message_value)
+    .execute(&mut *connection)
+    .await
+    .context("Inserting to the database error!")?
+    .last_insert_rowid();
+    debug!("DB insert id: {}", id);
+    Ok(())
 }
 
 #[tokio::main]
