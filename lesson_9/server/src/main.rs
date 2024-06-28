@@ -49,6 +49,22 @@ fn log_incoming(message: &Message, client_addr: &std::net::SocketAddr) {
     }
 }
 
+/// Runs the chat server.
+///
+/// This function initializes the database, parses the server address arguments, binds the server to the given address,
+/// sets up a broadcast channel for message broadcasting, and enters a loop to accept and handle incoming client
+/// connections.
+///
+/// # Returns
+///
+/// - `Result<()>`: The result of running the server. Returns `Ok(())` if successful, otherwise returns an error.
+///
+/// # Errors
+///
+/// This function will return an error if:
+///
+/// - There is an issue initializing the database.
+/// - The server fails to bind to the specified address.
 async fn run_server() -> Result<()> {
     let pool = init_db().await?;
     let address = chat::Address::parse_arguments();
@@ -112,6 +128,23 @@ fn logger_init() {
     Builder::from_env(env).init();
 }
 
+/// Initializes the SQLite database.
+///
+/// This function checks if the database exists. If it does not, it creates the database.
+/// It then connects to the database and ensures that the necessary tables are created.
+///
+/// # Returns
+///
+/// - `Result<SqlitePool>`: A result containing the SQLite connection pool if successful,
+///   or an error if there was an issue creating or connecting to the database.
+///
+/// # Errors
+///
+/// This function will return an error if:
+///
+/// - There is an issue creating the database.
+/// - There is an issue connecting to the database.
+/// - There is an issue creating the required tables in the database.
 async fn init_db() -> Result<SqlitePool> {
     if !Sqlite::database_exists(DB).await.unwrap_or(false) {
         info!("Creating database: {}", DB);

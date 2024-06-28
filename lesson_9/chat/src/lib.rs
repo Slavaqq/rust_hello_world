@@ -17,14 +17,14 @@ pub struct Address {
 }
 
 /// Represents a message with a nickname and a message type.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
     pub nickname: String,
     pub message: MessageType,
 }
 
 /// Enum representing different types of messages.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MessageType {
     /// Text message.
     Text(String),
@@ -172,6 +172,22 @@ impl MessageType {
         MessageType::Image(data.to_vec())
     }
 
+    /// Retrieves the type and message content from the MessageType enum.
+    ///
+    /// # Returns
+    ///
+    /// A tuple where the first element is a string slice representing the type of message ("Text", "Image", or "File"),
+    /// and the second element is a String containing the message content or the file name.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chat::MessageType;
+    /// let message = MessageType::Text("Hello".to_string());
+    /// let (message_type, content) = message.get_type_and_message();
+    /// assert_eq!(message_type, "Text");
+    /// assert_eq!(content, "Hello".to_string());
+    /// ```
     pub fn get_type_and_message(&self) -> (&str, String) {
         match self {
             Self::Text(text) => ("Text", text.clone()),
@@ -283,5 +299,93 @@ impl Message {
     /// ```
     pub fn deserialized_message(input: &[u8]) -> Result<Message, BincodeError> {
         bincode::deserialize(input)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bincode;
+
+    #[test]
+    fn test_address_new() {
+        let addr = Address::new("0.0.0.0".to_string(), "10000".to_string());
+        assert_eq!(addr.hostname, "0.0.0.0");
+        assert_eq!(addr.port, "10000");
+    }
+
+    #[test]
+    fn test_address_default() {
+        let addr = Address::default();
+        assert_eq!(addr.hostname, "localhost");
+        assert_eq!(addr.port, "11111");
+    }
+
+    #[test]
+    fn test_address_to_string() {
+        let addr = Address::new("0.0.0.0".to_string(), "10000".to_string());
+        assert_eq!(addr.to_string(), "0.0.0.0:10000");
+    }
+
+    #[test]
+    fn test_message_text() {
+        let msg = Message {
+            nickname: "slava".to_string(),
+            message: MessageType::Text("Hello".to_string()),
+        };
+        assert_eq!(msg.nickname, "slava");
+        match msg.message {
+            MessageType::Text(ref text) => assert_eq!(text, "Hello"),
+            _ => panic!("Expected MessageType::Text"),
+        }
+    }
+
+    #[test]
+    fn test_message_image() {
+        let image_data = vec![1, 2, 3, 4];
+        let msg = Message {
+            nickname: "slava".to_string(),
+            message: MessageType::Image(image_data.clone()),
+        };
+        assert_eq!(msg.nickname, "slava");
+        match msg.message {
+            MessageType::Image(ref data) => assert_eq!(data, &image_data),
+            _ => panic!("Expected MessageType::Image"),
+        }
+    }
+
+    #[test]
+    fn test_message_file() {
+        let file_name = "file.txt".to_string();
+        let file_content = vec![0u8; 5];
+        let msg = Message {
+            nickname: "slava".to_string(),
+            message: MessageType::File {
+                name: file_name.clone(),
+                content: file_content.clone(),
+            },
+        };
+        assert_eq!(msg.nickname, "slava");
+        match msg.message {
+            MessageType::File {
+                ref name,
+                ref content,
+            } => {
+                assert_eq!(name, &file_name);
+                assert_eq!(content, &file_content);
+            }
+            _ => panic!("Expected MessageType::File"),
+        }
+    }
+
+    #[test]
+    fn test_message_serialization() {
+        let msg = Message {
+            nickname: "slava.".to_string(),
+            message: MessageType::Text("Hello".to_string()),
+        };
+        let serialized = bincode::serialize(&msg).unwrap();
+        let deserialized: Message = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(msg, deserialized);
     }
 }
