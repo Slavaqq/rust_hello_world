@@ -4,12 +4,13 @@ This is a simple chat client application written in Rust.
 
 ## Features
 
-- **NEW** Choose a nickname at the start which will be visible to other chat participants.
+- Choose a nickname at the start which will be visible to other chat participants.
 - Simple command interface.
 - Send and receive messages in real-time.
 - Share files with other users.
 - Share image files with other users.
-- **NEW** Meows when a message is received.
+- Meows when a message is received.
+- **NEW** Client runs in async runtime.
 
 ### Notification Sound
 

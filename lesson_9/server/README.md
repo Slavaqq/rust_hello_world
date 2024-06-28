@@ -6,12 +6,22 @@ This is a simple chat server application written in Rust. It allows multiple cli
 
 - Accept multiple client connections.
 - Broadcast messages from one client to all other connected clients.
-- [**NEW** use `parking_lot::Mutex`](https://crates.io/crates/parking_lot)
-- [**NEW** use `env_logger` for logging](https://crates.io/crates/env_logger)
+- [use `parking_lot::Mutex`](https://crates.io/crates/parking_lot)
+- [use `env_logger` for logging](https://crates.io/crates/env_logger)
+- [**NEW** use `tokio` for async](https://crates.io/crates/tokio)
+- [**NEW** use `sqlx` for handling database](https://crates.io/crates/sqlx)
 
 ## Requirements
 
 - Rust programming language installed. You can install Rust from [here](https://www.rust-lang.org/tools/install).
+
+## Database
+
+There is SQLite database `server.db` holding message data. Check the databse content with:
+
+```sh
+sqlite3 server.db "SELECT * FROM messages;"
+```
 
 ## Usage
 

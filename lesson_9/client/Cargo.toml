@@ -13,3 +13,4 @@ serde_json = "1.0.117"
 slugify = "0.1.0"
 rodio = { version = "0.18.1", features = ["wav"] }
 anyhow = "1.0.86"
+tokio = { version = "1.38.0", features = ["full"] }
