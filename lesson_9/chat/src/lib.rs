@@ -41,7 +41,7 @@ pub enum MessageType {
 pub enum MessageError {
     #[error("de/serialization error")]
     DeSerializationError(#[from] BincodeError),
-    #[error("unexpected")]
+    #[error("unexpected disconnection")]
     UnexpectedEof,
     #[error(transparent)]
     IOError(#[from] io::Error),
