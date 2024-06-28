@@ -55,4 +55,3 @@ To start the server on `localhost` with port `10000`, run:
 ```sh
 RUST_LOG=debug cargo run --release -- localhost 10000
 ```
-# Database

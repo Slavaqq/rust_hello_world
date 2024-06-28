@@ -22,8 +22,8 @@ const DB: &str = "sqlite://server.db";
 
 fn log_broadcasting(
     message: &Message,
-    sender_addr: &core::net::SocketAddr,
-    receiver_addr: &core::net::SocketAddr,
+    sender_addr: &std::net::SocketAddr,
+    receiver_addr: &std::net::SocketAddr,
 ) {
     if log_enabled!(Level::Debug) {
         debug!(
@@ -38,7 +38,7 @@ fn log_broadcasting(
     };
 }
 
-fn log_incoming(message: &Message, client_addr: &core::net::SocketAddr) {
+fn log_incoming(message: &Message, client_addr: &std::net::SocketAddr) {
     if log_enabled!(Level::Debug) {
         debug!(
             "Incoming message from client {:?} ({:?}).",
@@ -60,21 +60,21 @@ async fn run_server() -> Result<()> {
     let (broadcast_send, _broadcast_revice) = broadcast::channel(1024);
     loop {
         let Ok((stream, addr)) = listener.accept().await else {
-            error!("Failed to accept connection");
+            error!("Failed to accept connection!");
             continue;
         };
         let sender = broadcast_send.clone();
         let mut receiver = broadcast_send.subscribe();
         let (mut stream_read, mut stream_writer) = stream.into_split();
-        let p = pool.clone();
+        let pool_clone = pool.clone();
 
         tokio::spawn(async move {
             loop {
                 match Message::read(&mut stream_read).await {
                     Ok(msg) => {
                         log_incoming(&msg, &addr);
-                        if let Err(err_msg) = insert_db(&p, &msg).await {
-                            error!("Insert database error: {err_msg}");
+                        if let Err(err_msg) = insert_db(&pool_clone, &msg).await {
+                            error!("Insert database error: {:?}", err_msg);
                         };
                         if sender.send((msg, addr)).is_err() {
                             break;
@@ -85,7 +85,7 @@ async fn run_server() -> Result<()> {
                         break;
                     }
                     Err(err_msg) => {
-                        error!("Sender Error: {err_msg:?}");
+                        error!("Sender Error: {:?}", err_msg);
                         break;
                     }
                 }
@@ -98,8 +98,8 @@ async fn run_server() -> Result<()> {
                     continue;
                 }
                 log_broadcasting(&message, &sender_addr, &addr);
-                if let Err(e) = message.send(&mut stream_writer).await {
-                    error!("Reciever Error: {e}");
+                if let Err(err_msg) = message.send(&mut stream_writer).await {
+                    error!("Reciever Error: {:?}", err_msg);
                     break;
                 }
             }
