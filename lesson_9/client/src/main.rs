@@ -49,6 +49,17 @@ fn print_help(nickname: &str) {
     println!("");
 }
 
+/// Runs the chat client.
+///
+/// This function parses the arguments to get the address of the server,
+/// connects to the server, and splits the stream into reading and writing parts.
+/// It then gets the user's nickname, prints the help message, and spawns the
+/// reading loop in a separate task. The writing loop runs in the main task.
+///
+/// # Errors
+///
+/// This function will return an error if there is a problem connecting to the server,
+/// getting the nickname, or if there is an error in the reading or writing loops.
 async fn run_client() -> Result<()> {
     let address = chat::Address::parse_arguments();
     let stream = TcpStream::connect(address.to_string()).await?;
@@ -72,11 +83,22 @@ fn get_nickname() -> Result<String> {
     Ok(nickname)
 }
 
+/// Reads messages from the server in a loop.
+///
+/// This function reads messages from the server and processes them accordingly.
+///
+/// # Arguments
+///
+/// * `stream` - The read half of the TCP stream.
+///
+/// # Errors
+///
+/// This function will return an error if there is a problem reading from the stream.
 async fn reading_loop(mut stream: OwnedReadHalf) -> Result<()> {
     loop {
         let message = chat::Message::read(&mut stream).await?;
         if let Err(err_msg) = handle_message(message).await {
-            eprintln!("Message hadling error: {:?}", err_msg);
+            eprintln!("Message handling error: {:?}", err_msg);
         };
         thread::spawn(move || {
             meow().unwrap_or_else(|err_msg| eprintln!("Sound error {:?}", err_msg))
@@ -84,6 +106,19 @@ async fn reading_loop(mut stream: OwnedReadHalf) -> Result<()> {
     }
 }
 
+/// Writes messages to the server in a loop.
+///
+/// This function allows the user to input messages to send to the server.
+/// It reads the input from the user, constructs appropriate messages, and writes them to the server.
+///
+/// # Arguments
+///
+/// * `stream` - The write half of the TCP stream.
+/// * `nickname` - The user's nickname.
+///
+/// # Errors
+///
+/// This function will return an error if there is a problem writing to the stream.
 async fn writing_loop(mut stream: OwnedWriteHalf, nickname: &str) -> Result<()> {
     loop {
         match get_input(nickname).await {
@@ -104,6 +139,34 @@ async fn get_input(nickname: &str) -> Result<Command> {
     parse_input(input, nickname).await
 }
 
+/// Parses the given input string and returns a `Command` based on the input content.
+///
+/// This function processes the input string to determine the type of command being issued.
+/// It supports commands for sending files, images, and text messages, as well as a quit command.
+///
+/// # Arguments
+///
+/// * `input` - A `String` containing the command input from the user.
+/// * `nickname` - A reference to a string slice that holds the nickname of the user.
+///
+/// # Returns
+///
+/// * `Result<Command>` - Returns a `Result` that contains a `Command` on success or an error if the input command is
+/// invalid.
+///
+/// # Commands
+///
+/// The function recognizes the following commands:
+///
+/// * `.file <path>` - Sends a file located at the specified path.
+/// * `.image <path>` - Sends an image located at the specified path.
+/// * `.quit` - Issues a quit command.
+/// * Any other input is treated as a text message.
+///
+/// # Errors
+///
+/// This function returns an error if the `.file` or `.image` commands are used without a valid path,
+/// or if there is an issue retrieving the file contents.
 async fn parse_input(input: String, nickname: &str) -> Result<Command> {
     let nickname = nickname.to_string();
     let command = if input.starts_with(".file") {
@@ -141,6 +204,26 @@ async fn get_file(path: &str) -> Result<(String, Vec<u8>)> {
     Ok((name, buff))
 }
 
+/// Handles an incoming message by printing or saving its content.
+///
+/// This function takes a `Message` struct as input and processes it based on its type:
+/// - For text messages, it prints the text content to the console.
+/// - For image messages, it saves the image content to a file.
+/// - For file messages, it saves the file content to a file.
+///
+/// # Arguments
+///
+/// * `message` - A `Message` struct containing the sender's nickname and the message content.
+///
+/// # Returns
+///
+/// This function returns a `Result` which is:
+/// - `Ok(())` if the message was handled successfully.
+/// - An error if there was a problem saving the image or file.
+///
+/// # Errors
+///
+/// This function will return an error if saving the image or file fails.
 async fn handle_message(message: Message) -> Result<()> {
     let nickname = message.nickname;
     print!("{nickname} --> ");
