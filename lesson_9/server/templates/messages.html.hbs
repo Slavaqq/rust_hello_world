@@ -1,0 +1,28 @@
+{{#*inline "page"}}
+
+<h1>Chat App Admin</h1>
+<h2>Messages:</h2>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Nickname</th>
+            <th>Message Type</th>
+            <th>Message</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{#each rows}}
+        <tr>
+            <td>{{this.0}}</td>
+            <td>{{this.1}}</td>
+            <td>{{this.2}}</td>
+            <td>{{this.3}}</td>
+        </tr>
+        {{/each}}
+    </tbody>
+</table>
+
+{{/inline}}
+{{> layout}}

@@ -6,11 +6,27 @@ description = "Server for simple chat app"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+
+[[bin]]
+name = "server"
+path = "src/server.rs"
+
+[[bin]]
+name = "admin"
+path = "src/admin.rs"
+
 [dependencies]
 anyhow = "1.0.86"
 chat = {path = "../chat"}
 env_logger = "0.11.3"
 log = "0.4.21"
 parking_lot = "0.12.3"
+rocket = "0.5.1"
+rocket_dyn_templates = { version = "0.2.0", features = ["handlebars"] }
+serde = "1.0.203"
 sqlx = { version = "0.7.4", features = ["sqlite", "runtime-tokio"] }
 tokio = { version = "1.38.0", features = ["full"] }
+
+[dependencies.rocket_db_pools]
+version = "0.2.0"
+features = ["sqlx_sqlite"]
