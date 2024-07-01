@@ -1,0 +1,12 @@
+{{#*inline "page"}}
+
+<h1>Chat App Admin</h1>
+<h2>Show by Nickname</h2>
+<form action="/messages/nickname" method="post">
+    <label for="nickaneme">Nickname:</label>
+    <input type="text" id="nickname" name="nickname" required>
+    <button type="submit">Show</button>
+</form>
+
+{{/inline}}
+{{> layout}}

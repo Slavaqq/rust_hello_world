@@ -1,0 +1,12 @@
+{{#*inline "page"}}
+
+<h1>Chat App Admin</h1>
+<h2>Delete by Nickname</h2>
+<form action="/delete/nickname" method="post">
+    <label for="nickname">Nickname:</label>
+    <input type="text" id="nickname" name="nickname" required>
+    <button type="submit">Delete</button>
+</form>
+
+{{/inline}}
+{{> layout}}
