@@ -10,8 +10,11 @@
 extern crate chat;
 
 use anyhow::{Context, Result};
+use axum::{http::StatusCode, routing::get, Router};
 use env_logger::{Builder, Env};
+use lazy_static::lazy_static;
 use log::{debug, error, info, log_enabled, Level};
+use prometheus::{Counter, Encoder, Gauge, Registry, TextEncoder};
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -19,6 +22,15 @@ use tokio::sync::broadcast;
 use chat::{Message, MessageError};
 
 const DB: &str = "sqlite://server.db";
+
+lazy_static! {
+    static ref REGISTRY: Registry = Registry::new();
+    static ref MESSAGE_COUNTER: Counter =
+        Counter::new("message_counter", "counts number of messages send")
+            .expect("Counter metrics init failed!");
+    static ref USER_COUNTER: Gauge = Gauge::new("user_counter", "counts number of connected users")
+        .expect("Gauge metrics init failed!");
+}
 
 fn log_broadcasting(
     message: &Message,
@@ -68,6 +80,7 @@ fn log_incoming(message: &Message, client_addr: &std::net::SocketAddr) {
 async fn run_server() -> Result<()> {
     let pool = init_db().await?;
     let address = chat::Address::parse_arguments();
+    get_metrics()?;
     let listener = TcpListener::bind(address.to_string())
         .await
         .with_context(|| format!("Binding error for address: {}", address.to_string()))?;
@@ -79,6 +92,7 @@ async fn run_server() -> Result<()> {
             error!("Failed to accept connection!");
             continue;
         };
+        USER_COUNTER.inc();
         let sender = broadcast_send.clone();
         let mut receiver = broadcast_send.subscribe();
         let (mut stream_read, mut stream_writer) = stream.into_split();
@@ -89,6 +103,7 @@ async fn run_server() -> Result<()> {
                 match Message::read(&mut stream_read).await {
                     Ok(msg) => {
                         log_incoming(&msg, &addr);
+                        MESSAGE_COUNTER.inc();
                         if let Err(err_msg) = insert_db(&pool_clone, &msg).await {
                             error!("Insert database error: {:?}", err_msg);
                         };
@@ -98,6 +113,7 @@ async fn run_server() -> Result<()> {
                     }
                     Err(MessageError::UnexpectedEof) => {
                         info!("Connection from {:?} terminated.", addr);
+                        USER_COUNTER.dec();
                         break;
                     }
                     Err(err_msg) => {
@@ -196,9 +212,42 @@ async fn insert_db(pool: &SqlitePool, message: &Message) -> Result<()> {
     Ok(())
 }
 
+fn get_metrics() -> Result<()> {
+    REGISTRY
+        .register(Box::new(MESSAGE_COUNTER.clone()))
+        .context("message counter metric registering error!")?;
+    REGISTRY
+        .register(Box::new(USER_COUNTER.clone()))
+        .context("counter metric registering error!")?;
+    Ok(())
+}
+
+async fn metrics() -> (StatusCode, String) {
+    let encoder = TextEncoder::new();
+    let mut buf = vec![];
+
+    if let Err(err_msg) = encoder.encode(&REGISTRY.gather(), &mut buf) {
+        error!("Metrics encoding error: {}", err_msg);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Metrics encoding error!".to_string(),
+        );
+    }
+    if let Ok(body) = String::from_utf8(buf) {
+        return (StatusCode::OK, body);
+    }
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unknow error!".to_string(),
+    )
+}
+
 #[tokio::main]
 async fn main() {
     logger_init();
+    let app = Router::new().route("/metrics", get(metrics));
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await.unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await });
     match run_server().await {
         Ok(_) => (),
         Err(err_msg) => error!("Error: {}", err_msg),

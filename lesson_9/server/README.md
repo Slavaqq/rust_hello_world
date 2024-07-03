@@ -10,12 +10,27 @@ This is a simple chat server application written in Rust. It allows multiple cli
 - [use `env_logger` for logging](https://crates.io/crates/env_logger)
 - [use `tokio` for async](https://crates.io/crates/tokio)
 - [use `sqlx` for handling database](https://crates.io/crates/sqlx)
-- [**NEW** use `rocket` for web admin panel](https://crates.io/crates/rocket)
+- [use `rocket` for web admin panel](https://crates.io/crates/rocket)
+- [**NEW** use `prometheus` for metrics](https://crates.io/crates/prometheus)
 
 ## Requirements
 
 - Rust programming language installed. You can install Rust from [here](https://www.rust-lang.org/tools/install).
 
+
+## Metrics
+
+You have to set correct ip address in `prometheus.yml` file. Then run:
+
+```sh
+docker-compose up
+```
+
+Prometheus runs on `http://localhost:9090/`
+Grafana runs on `http://localhost:3123/`
+
+- message_counter, message_counter counts number of messages send
+- user_counter, counts number of connected users
 
 ## Admin Panel
 
