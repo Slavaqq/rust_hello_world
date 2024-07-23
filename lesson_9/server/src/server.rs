@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use axum::{http::StatusCode, routing::get, Router};
 use env_logger::{Builder, Env};
 use lazy_static::lazy_static;
-use log::{debug, error, info, log_enabled, Level};
+use log::{debug, error, info};
 use prometheus::{Counter, Encoder, Gauge, Registry, TextEncoder};
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use tokio::net::TcpListener;
@@ -37,28 +37,22 @@ fn log_broadcasting(
     sender_addr: &std::net::SocketAddr,
     receiver_addr: &std::net::SocketAddr,
 ) {
-    if log_enabled!(Level::Debug) {
-        debug!(
-            "Broadcasting message from client {:?} to client {:?} ({:?}).",
-            sender_addr, receiver_addr, message
-        );
-    } else {
-        info!(
-            "Broadcasting message from client {:?} to client {:?}.",
-            sender_addr, receiver_addr
-        );
-    };
+    debug!(
+        "Broadcasting message from client {:?} to client {:?} ({:?}).",
+        sender_addr, receiver_addr, message
+    );
+    info!(
+        "Broadcasting message from client {:?} to client {:?}.",
+        sender_addr, receiver_addr
+    );
 }
 
 fn log_incoming(message: &Message, client_addr: &std::net::SocketAddr) {
-    if log_enabled!(Level::Debug) {
-        debug!(
-            "Incoming message from client {:?} ({:?}).",
-            client_addr, message,
-        );
-    } else {
-        info!("Incoming message from client {:?}.", client_addr);
-    }
+    debug!(
+        "Incoming message from client {:?} ({:?}).",
+        client_addr, message,
+    );
+    info!("Incoming message from client {:?}.", client_addr);
 }
 
 /// Runs the chat server.
